@@ -13,9 +13,11 @@ PATH
 GEM
   remote: https://rubygems.org/
   specs:
+    concurrent-ruby (1.1.6)
     diff-lcs (1.2.5)
     highline (1.6.19)
-    i18n (0.6.5)
+    i18n (1.8.2)
+      concurrent-ruby (~> 1.0)
     net-ssh (2.7.0)
     rake (10.4.2)
     rspec (2.14.1)
@@ -35,7 +37,7 @@ PLATFORMS
 DEPENDENCIES
   bundler (= 1.10.6)
   highline (= 1.6.19)
-  i18n (= 0.6.5)
+  i18n (= 1.8.2)
   net-ssh (= 2.7.0)
   oo-install!
   rake (= 10.4.2)
