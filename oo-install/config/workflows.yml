@@ -1,0 +1,185 @@
+---
+Name: Origin VM Instructions
+Contexts:
+  - origin_vm
+Summary: Take the Admin Tutorial
+Description: Explains how to administer the Origin VM
+ID: vm_tutorial
+WorkflowDir: origin_vm_tasks
+NonDeployment: Y
+ExitOnComplete: N
+Executable: <workflow_path>/vm_tutorial
+---
+Name: Origin VM Console
+Contexts:
+  - origin_vm
+Summary: Connect to this VM via `rhc` or the web console
+Description: Explains how to view the web console on this VM.
+ID: vm_view_console
+WorkflowDir: origin_vm_tasks
+NonDeployment: Y
+ExitOnComplete: N
+Executable: <workflow_path>/vm_client_connect
+---
+Name: OO Deployment from VM
+Contexts:
+  - origin_vm
+Targets:
+  - rhel
+  - centos
+Summary: Install OpenShift Origin on Other Systems
+Description: To install a new OpenShift Origin deployment on one or more target systems, select this option
+ID: origin_deploy
+Executable: <workflow_path>/originator.rb
+RemoteDeployment: Y
+SubscriptionCheck: Y
+Repositories:
+  - repos_base
+  - jboss_repo_base
+  - jenkins_repo_base
+  - os_repo
+  - os_optional_repo
+  - puppet_repo_rpm
+RequiredComponents:
+  - channel:rhel:optional
+  - pkg:all:puppet
+  - pkg:all:openssh-clients
+  - pkg:nameserver:bind
+IncompatibleComponents:
+  - pkg:all:firewalld
+---
+Name: OO Deployment
+Contexts:
+  - origin
+Targets:
+  - rhel
+  - centos
+Summary: Install OpenShift Origin
+Description: To install a new OpenShift Origin deployment on one or more target systems, select this option
+ID: origin_deploy
+Executable: <workflow_path>/originator.rb
+RemoteDeployment: Y
+SubscriptionCheck: Y
+Repositories:
+  - repos_base
+  - jboss_repo_base
+  - jenkins_repo_base
+  - os_repo
+  - os_optional_repo
+  - puppet_repo_rpm
+RequiredComponents:
+  - channel:rhel:optional
+  - pkg:all:puppet
+  - pkg:all:openssh-clients
+  - pkg:nameserver:bind
+IncompatibleComponents:
+  - pkg:all:firewalld
+---
+Name: OO Node Instance Deployment
+Contexts:
+  - origin
+Targets:
+  - rhel
+  - centos
+Summary: Add a Node to an OpenShift Origin deployment
+Description: If you have already deployed an OpenShift Enterprise system, use this option to add a new Node host to the existing system.
+ID: origin_add_node
+WorkflowDir: origin_deploy
+Questions:
+  - Text: From your list of Nodes, which instance would you like to deploy?
+    Variable: rolehost
+    AnswerType: rolehost:node
+Executable: <workflow_path>/originator.rb <q:rolehost>
+RemoteDeployment: Y
+SubscriptionCheck: Y
+Repositories:
+  - repos_base
+  - jboss_repo_base
+  - jenkins_repo_base
+  - os_repo
+  - os_optional_repo
+  - puppet_repo_rpm
+RequiredComponents:
+  - channel:rhel:optional
+  - pkg:all:puppet
+  - pkg:all:openssh-clients
+IncompatibleComponents:
+  - pkg:all:firewalld
+---
+Name: Puppet templates
+Contexts:
+  - origin
+  - origin_vm
+Targets:
+  - rhel
+  - centos
+Summary: Generate a Puppet Configuration File
+Description: Make a puppet configuration file that you can use to run an OpenShift Origin installation.
+ID: puppet_template
+WorkflowDir: origin_deploy
+Executable: <workflow_path>/originator.rb nil true
+SubscriptionCheck: Y
+Repositories:
+  - repos_base
+  - jboss_repo_base
+  - jenkins_repo_base
+  - os_repo
+  - os_optional_repo
+RequiredComponents:
+  - pkg:nameserver:bind
+---
+Name: OE Deployment
+Contexts:
+  - ose
+Targets:
+  - rhel
+Summary: Install OpenShift Enterprise
+Description: If you currently have no OpenShift Enterprise 2.2 system, select this option to deploy OpenShift Enterprise to one or more target hosts.
+ID: enterprise_deploy
+WorkflowDir: enterprise_deploy
+Executable: <workflow_path>/launcher.rb
+RemoteDeployment: y
+SubscriptionCheck: y
+Repositories:
+  - cdn_repo_base
+  - jboss_repo_base
+  - rhel_repo
+  - rhscl_repo_base
+  - ose_repo_base
+  - rhel_extra_repo
+  - jbosseap_extra_repo
+  - jbossews_extra_repo
+  - rhscl_extra_repo
+  - ose_extra_repo
+RequiredComponents:
+  - pkg:all:openssh-clients
+---
+Name: OE Node-Instance Deployment
+Contexts:
+  - ose
+Targets:
+  - rhel
+Summary: Add a Node to OpenShift Enterprise
+Description: If you have already deployed an OpenShift Enterprise 2.2 system, use this option to add a new Node host to the existing system.
+ID: enterprise_add_node
+WorkflowDir: enterprise_deploy
+Questions:
+  - Text: From your list of Nodes, which instance would you like to deploy?
+    Variable: rolehost
+    AnswerType: rolehost:node
+Executable: <workflow_path>/launcher.rb <q:rolehost>
+RemoteDeployment: y
+SubscriptionCheck: y
+Repositories:
+  - cdn_repo_base
+  - jboss_repo_base
+  - rhel_repo
+  - rhscl_repo_base
+  - ose_repo_base
+  - rhel_extra_repo
+  - jbosseap_extra_repo
+  - jbossews_extra_repo
+  - rhscl_extra_repo
+  - ose_extra_repo
+RequiredComponents:
+  - pkg:all:openssh-clients

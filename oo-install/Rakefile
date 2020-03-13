@@ -1,0 +1,292 @@
+require 'bundler/gem_tasks'
+require 'installer/helpers'
+
+include Installer::Helpers
+
+task :package do
+  @tmpdir = ENV['TMPDIR'] || '/tmp/'
+  @package_dir = "#{gem_root_dir}/package"
+  @portable_dir = @package_dir + "/portable"
+  @portable_readme = 'oo_install_launcher.README.txt'
+  @site_assets_dir = "#{gem_root_dir}/site_assets"
+  @ose_launchers = {}
+  @use_local_script = false
+
+  if ENV['USE_LOCAL_SCRIPT']
+    @use_local_script = true
+  end
+
+  if `uname`.chomp.strip == 'Linux'
+    @sed_cmd = 'sed --in-place='
+  else
+    @sed_cmd = 'sed -i '
+  end
+
+  # Clear out the old package dir before making the new package
+  if Dir.entries(gem_root_dir).include?('package')
+    system 'rm', '-rf', @package_dir
+  end
+
+  Dir.mkdir(@package_dir)
+  Dir.mkdir(@portable_dir)
+
+  # Set up a new package / archive name
+  pkgtime = Time.now.getutc.strftime('%Y%m%d-%H%M')
+
+  branches = `git branch`.split(/\n/).map{ |branch| branch.strip }
+
+  # Remeber the working branch so that we can return here later.
+  working_branch = 'master'
+  branches.each do |branch|
+    next if not branch.start_with?('*')
+    working_branch = branch.sub!(/^\* /,'')
+  end
+
+  # Make sure the working branch doesn't have any uncommitted changes
+  changed_files = `git status --porcelain`
+  if not changed_files.empty?
+    puts "Warning: Your current branch has uncommitted changes. Hit <CTRL+C> if you want to exit."
+    print "Starting packager in "
+    [3,2,1].each do |i|
+      print "#{i}..."
+      sleep 1
+    end
+    print "\n"
+  end
+
+  builds = [
+    # TODO: Figure out if this should be changed to 3.0
+    { :version => nil,
+      #:ose_launcher => 'https://raw.githubusercontent.com/openshift/openshift-extras/enterprise-2.2/enterprise/install-scripts/generic/openshift.sh',
+      :context => :origin,
+      :base => working_branch,
+      :branch => 'master',
+    },
+    { :version => 'ose',
+      :version_text => 'OpenShift Container Platform 3.x',
+      :ansible_code => 'https://github.com/openshift/openshift-ansible/archive/v3.0.2-2.tar.gz',
+      :context => :ose,
+      :branch => 'enterprise-3.x',
+    },
+  ]
+
+  # Now make sure the build branches are available.
+  missing_branches = false
+  builds.each do |build|
+    if not branches.include?(build[:branch])
+      if not missing_branches
+        puts "ERROR: One or more branches for packaging are not available in this local repo:"
+        missing_branches = true
+      end
+      puts "- #{build[:branch]}"
+    end
+  end
+  if missing_branches
+    puts "Add these branches and rerun the packaging command."
+    exit 1
+  end
+
+  builds.each do |build|
+    # Check out this build branch
+    system("git checkout #{build[:branch]}")
+
+    if not $?.exitstatus == 0
+      puts "ERROR: Could not check out branch #{build[:branch]}, please investigate."
+      exit 1
+    end
+
+    puts "Building #{build[:version].nil? ? 'base' : build[:version].to_s }"
+    pkgname = 'oo-install-'
+    pkgurl = ''
+    pkgdir = @package_dir
+    context = build[:context].to_s
+    if not build[:version].nil?
+      pkgname << build[:version] + '-'
+      pkgurl = build[:version] + '\/'
+      pkgdir = @package_dir + "/" + build[:version]
+      Dir.mkdir(pkgdir)
+    end
+    pkgname << pkgtime
+
+    version_text = build[:version_text].nil? ? '' : "#{build[:version_text]} - "
+    version_text << "Build #{pkgtime}"
+
+    # Copy the installer source to $TMPDIR
+    # the -R flag must be capitalized, else cp on OS X fails
+    system "cp -RL #{gem_root_dir} #{@tmpdir}"
+    if not $?.exitstatus == 0
+      puts "Failed to copy #{gem_root_dir} to #{@tmpdir}\nExiting."
+      exit 1
+    end
+
+    system "mv #{@tmpdir}/oo-install #{@tmpdir}/#{pkgname}"
+    if not $?.exitstatus == 0
+      puts "Failed to move #{@tmpdir}/oo-install to #{@tmpdir}/#{pkgname}\nExiting."
+      exit 1
+    end
+
+    ose_launcher_path = "#{@tmpdir}/#{pkgname}/workflows/enterprise_deploy/openshift.sh"
+
+    # If there is a replacement openshift.sh file, get it.
+    if (not build[:ose_launcher].nil?) and (not @use_local_script)
+      launcher_url = build[:ose_launcher]
+      if @ose_launchers[launcher_url].nil?
+        puts "Fetching ose launch script from: #{launcher_url}"
+        @ose_launchers[launcher_url] = `curl -s #{launcher_url}`
+        if not $?.exitstatus == 0
+          puts "Failed to get #{build[:ose_launcher]}\nExiting."
+          exit 1
+        end
+      end
+      system "rm #{ose_launcher_path}"
+      if not $?.exitstatus == 0
+        puts "Failed to remove #{ose_launcher_path}\nExiting."
+        exit 1
+      end
+      File.open(ose_launcher_path, 'w') { |file| file.write(@ose_launchers[launcher_url]) }
+      File.chmod(0755, ose_launcher_path)
+    end
+
+    if (not build[:ansible_code].nil?)
+      puts "Fetching ansible code from: #{build[:ansible_code]}"
+      `curl -L #{build[:ansible_code]} | tar -C #{@tmpdir}/#{pkgname} -xvz`
+      if not $?.exitstatus == 0
+        puts "Failed to get #{build[:ansible_code]}\nExiting."
+        exit 1
+      end
+    end
+
+    # Zip up the source and copy it to the package dir
+    system "cd #{@tmpdir} && rm -rf #{pkgname}/package && tar czf #{pkgdir}/#{pkgname}.tgz #{pkgname}"
+    if not $?.exitstatus == 0
+      puts "Failed to package #{pkgname} as #{pkgdir}/#{pkgname}.tgz\nExiting."
+      exit 1
+    end
+
+    # Copy the bootstrap file to the package dir
+    system 'cp', 'site_assets/oo-install-bootstrap.sh', "#{pkgdir}/index.html"
+    if not $?.exitstatus == 0
+      puts "Failed to copy bootstrap script to #{pkgdir}/index.html\nExiting."
+      exit 1
+    end
+
+    unless ENV['APP_URL'] == 'install.openshift.com' or ENV['APP_URL'].nil?
+      system "#{@sed_cmd}.bak 's/install.openshift.com/#{ENV['APP_URL']}/g' #{pkgdir}/index.html"
+      if not $?.exitstatus == 0
+        puts "Failed to replace instances of install.openshift.com with #{ENV['APP_URL']}\nExiting."
+        exit 1
+      end
+
+      system 'rm', "#{pkgdir}/index.html.bak"
+    end
+
+    if build.has_key?(:base) and build[:base]
+      system 'cp', 'site_assets/site_info.html',
+        'site_assets/openshift-logo-horizontal-99a90035cbd613be7b6293335eb05563.svg',
+        'vendor/bootstrap/css/bootstrap.min.css', pkgdir
+      if not $?.exitstatus == 0
+        puts "Failed to copy site assets to #{pkgdir}\nExiting."
+        exit 1
+      end
+
+      # Replace install.openshift.com with ENV['APP_URL'] if set
+      unless ENV['APP_URL'].nil?
+        system "#{@sed_cmd}.bak 's/install.openshift.com/#{ENV['APP_URL']}/g' #{pkgdir}/site_info.html"
+        if not $?.exitstatus == 0
+          puts "Failed to replace instances of install.openshift.com with #{ENV['APP_URL']}\nExiting."
+          exit 1
+        end
+
+        system 'rm', "#{pkgdir}/site_info.html.bak"
+      end
+    end
+    system "#{@sed_cmd}.bak 's/INSTALLPKGNAME/#{pkgname}/g' #{pkgdir}/index.html"
+    if not $?.exitstatus == 0
+      puts "Failed to replace instances of INSTALLPKGNAME with #{pkgname}\nExiting."
+      exit 1
+    end
+
+    system "#{@sed_cmd}.bak 's/INSTALLVERPATH/#{pkgurl}/' #{pkgdir}/index.html"
+    if not $?.exitstatus == 0
+      puts "Failed to replace instances of INSTALLVERPATH with #{pkgurl}\nExiting."
+      exit 1
+    end
+
+    system "#{@sed_cmd}.bak 's/OPENSHIFTVERSION/#{build[:version].nil? ? 'base' : build[:version]}/' #{pkgdir}/index.html"
+    if not $?.exitstatus == 0
+      puts "Failed to replace instances of OPENSHIFTVERSION with #{build[:version].nil? ? 'base' : build[:version]}\nExiting."
+      exit 1
+    end
+
+    system "#{@sed_cmd}.bak 's/INSTALLVERSION/#{version_text}/' #{pkgdir}/index.html"
+    if not $?.exitstatus == 0
+      puts "Failed to replace instances of INSTALLVERSION #{version_text}\nExiting."
+      exit 1
+    end
+
+    system "#{@sed_cmd}.bak 's/INSTALLCONTEXT/#{context}/' #{pkgdir}/index.html"
+    if not $?.exitstatus == 0
+      puts "Failed to replace instances of INSTALLCONTEXT with #{context}\nExiting."
+      exit 1
+    end
+
+    system 'rm', "#{pkgdir}/index.html.bak"
+
+    # Lastly, make a "portable" package.
+    next if build[:version].nil?
+
+    launcher_name = 'oo-install'
+    build_name = 'origin'
+    if not build[:version].nil?
+      launcher_name << "-#{build[:version]}"
+      build_name = build[:version]
+    end
+    system "cd #{pkgdir} && cp index.html #{@portable_dir}/#{launcher_name} && chmod +x #{@portable_dir}/#{launcher_name}"
+    if not $?.exitstatus == 0
+      puts "Failed to create the portable launcher bootstrap for #{launcher_name}\nExiting."
+      exit 1
+    end
+
+    system "cd #{pkgdir} && cp #{pkgname}.tgz #{@portable_dir}/#{pkgname}.tgz"
+    if not $?.exitstatus == 0
+      puts "Failed to move the installer tarball to the portable launcher directory #{@portable_dir}\nExiting."
+      exit 1
+    end
+
+    system "cp #{@site_assets_dir}/#{@portable_readme} #{@portable_dir}"
+    if not $?.exitstatus == 0
+      puts "Failed to move the portable readme to #{@portable_dir}\nExiting."
+      exit 1
+    end
+
+    system "#{@sed_cmd}.bak 's/LAUNCHERNAME/#{launcher_name}/g' #{@portable_dir}/#{@portable_readme}"
+    if not $?.exitstatus == 0
+      puts "Failed to replace LAUNCHERNAME with #{launcher_name} in #{@portable_dir}/#{@portable_readme}\nExiting."
+      exit 1
+    end
+
+    system "rm #{@portable_dir}/#{@portable_readme}.bak"
+
+    system "cd #{@portable_dir} && tar czf #{launcher_name}.tgz #{launcher_name} #{@portable_readme} #{pkgname}.tgz"
+    if not $?.exitstatus == 0
+      puts "Failed to create the portable launcher package\nExiting."
+      exit 1
+    end
+
+    system "cd #{@portable_dir} && rm #{launcher_name} #{pkgname}.tgz #{@portable_readme}"
+
+    if build[:portable_only]
+      system 'rm', '-rf', pkgdir
+    end
+  end
+
+  # Return to the original branch
+  system("git checkout #{working_branch}")
+
+  system 'rm', '-rf', "#{@tmpdir}oo-install*"
+end
+
+task :clean do
+  @package_dir = "#{gem_root_dir}/package"
+  system "rm -rf #{@package_dir}"
+end
