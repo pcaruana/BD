@@ -19,7 +19,7 @@ GEM
     i18n (1.8.2)
       concurrent-ruby (~> 1.0)
     net-ssh (2.7.0)
-    rake (10.4.2)
+    rake (13.0.1)
     rspec (2.14.1)
       rspec-core (~> 2.14.0)
       rspec-expectations (~> 2.14.0)
@@ -40,7 +40,7 @@ DEPENDENCIES
   i18n (= 1.8.2)
   net-ssh (= 2.7.0)
   oo-install!
-  rake (= 10.4.2)
+  rake (= 13.0.1)
   rspec (= 2.14.1)
   rspec-core (= 2.14.5)
   rspec-expectations (= 2.14.3)
